@@ -19,9 +19,12 @@ class Particle {
         this.baseY = y;
         this.density = (Math.random() * 10) + 1;
         this.velocity = { x: 0, y: 0 };
-        this.alpha = 1; // Full opacity
-        this.angle = Math.random() * Math.PI * 0.25; // Random angle for organic movement
-        this.speed = Math.random() * 2 + 0.1; // Random speed for organic movement
+        this.alpha = 1;
+        this.noise = {
+            x: Math.random() * 0.5 - 0.25,
+            y: Math.random() * 0.5 - 0.25
+        };
+        this.noiseOffset = Math.random() * 1000;
     }
 
     draw() {
@@ -47,25 +50,35 @@ class Particle {
         const dx = mouseX - this.x;
         const dy = mouseY - this.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
-        const maxDistance = 80;
+        const maxDistance = 35; // 65% smaller than 100
 
         if (distance < maxDistance) {
             // Organic movement when near the mouse
-            this.angle += 0.05;
-            const moveX = Math.cos(this.angle) * this.speed;
-            const moveY = Math.sin(this.angle) * this.speed;
-            this.x += moveX + (dx / distance) * (maxDistance - distance) / maxDistance * 2;
-            this.y += moveY + (dy / distance) * (maxDistance - distance) / maxDistance * 2;
+            const force = (maxDistance - distance) / maxDistance;
+            const angle = Math.atan2(dy, dx);
+            
+            // Add noise to the movement
+            const noiseX = Math.sin(currentTime * 0.002 + this.noiseOffset) * this.noise.x;
+            const noiseY = Math.cos(currentTime * 0.002 + this.noiseOffset) * this.noise.y;
+            
+            this.velocity.x += Math.cos(angle) * force * 0.1 + noiseX; // 15% slower than original force 0.2
+            this.velocity.y += Math.sin(angle) * force * 0.1 + noiseY;
+            
+            // Apply velocity with stronger damping
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
+            this.velocity.x *= 0.9;
+            this.velocity.y *= 0.9;
         } else {
-            // Return to original position
-            if (this.x !== this.baseX) {
-                const dx = this.baseX - this.x;
-                this.x += dx / 10;
-            }
-            if (this.y !== this.baseY) {
-                const dy = this.baseY - this.y;
-                this.y += dy / 10;
-            }
+            // Return to original position with easing
+            const returnForce = 0.05;
+            this.velocity.x += (this.baseX - this.x) * returnForce;
+            this.velocity.y += (this.baseY - this.y) * returnForce;
+            
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
+            this.velocity.x *= 0.9;
+            this.velocity.y *= 0.9;
         }
     }
 
@@ -79,7 +92,8 @@ class Particle {
 
 function init() {
     particles = [];
-    ctx.font = '30px Arial';
+    // Change font to bold or increase size to fit with your name
+    ctx.font = '500 28px "Poppins", Arial, sans-serif';
     ctx.fillStyle = 'white';
     
     const text = 'Jonas Kjeldmand Jensen';
@@ -93,9 +107,9 @@ function init() {
     
     const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
     
-    for (let y = 0; y < data.height; y += 2) {
-        for (let x = 0; x < data.width; x += 2) {
-            if (data.data[(y * 4 * data.width) + (x * 4) + 3] > 128) {
+    for (let y = 0; y < data.height; y += 3) { // Increased step to 3
+        for (let x = 0; x < data.width; x += 3) { // Increased step to 3
+            if (data.data[(y * 4 * data.width) + (x * 4) + 3] > 200) { // Increased threshold to 200
                 particles.push(new Particle(x, y));
             }
         }
