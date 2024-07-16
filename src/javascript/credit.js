@@ -1,7 +1,5 @@
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
 
 let particles = [];
 let isExploding = false;
@@ -53,7 +51,7 @@ class Particle {
         const maxDistance = 35; // 65% smaller than 100
 
         if (distance < maxDistance) {
-            // Organic movement when near the mouse
+            // Organic movement when near the mouse/touch
             const force = (maxDistance - distance) / maxDistance;
             const angle = Math.atan2(dy, dx);
             
@@ -61,7 +59,7 @@ class Particle {
             const noiseX = Math.sin(currentTime * 0.002 + this.noiseOffset) * this.noise.x;
             const noiseY = Math.cos(currentTime * 0.002 + this.noiseOffset) * this.noise.y;
             
-            this.velocity.x += Math.cos(angle) * force * 0.1 + noiseX; // 15% slower than original force 0.2
+            this.velocity.x += Math.cos(angle) * force * 0.1 + noiseX;
             this.velocity.y += Math.sin(angle) * force * 0.1 + noiseY;
             
             // Apply velocity with stronger damping
@@ -92,8 +90,11 @@ class Particle {
 
 function init() {
     particles = [];
-    // Change font to bold or increase size to fit with your name
-    ctx.font = '500 28px "Poppins", Arial, sans-serif';
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const fontSize = Math.min(window.innerWidth / 20, 28);
+    ctx.font = `550 ${fontSize}px "Poppins", Arial, sans-serif`;
     ctx.fillStyle = 'white';
     
     const text = 'Jonas Kjeldmand Jensen';
@@ -107,9 +108,10 @@ function init() {
     
     const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
     
-    for (let y = 0; y < data.height; y += 3) { // Increased step to 3
-        for (let x = 0; x < data.width; x += 3) { // Increased step to 3
-            if (data.data[(y * 4 * data.width) + (x * 4) + 3] > 200) { // Increased threshold to 200
+    const step = Math.max(1, Math.floor(3 * window.devicePixelRatio));
+    for (let y = 0; y < data.height; y += step) {
+        for (let x = 0; x < data.width; x += step) {
+            if (data.data[(y * 4 * data.width) + (x * 4) + 3] > 200) {
                 particles.push(new Particle(x, y));
             }
         }
@@ -121,27 +123,63 @@ let mouse = {
     y: null
 }
 
-window.addEventListener('mousemove', function(event) {
-    mouse.x = event.x;
-    mouse.y = event.y;
-});
+function handleInteraction(event) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
 
-canvas.addEventListener('click', function(event) {
+    if (event.type === 'mousemove') {
+        mouse.x = (event.clientX - rect.left) * scaleX;
+        mouse.y = (event.clientY - rect.top) * scaleY;
+    } else if (event.type === 'touchmove') {
+        mouse.x = (event.touches[0].clientX - rect.left) * scaleX;
+        mouse.y = (event.touches[0].clientY - rect.top) * scaleY;
+        event.preventDefault();
+    }
+}
+
+function handleClick(event) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const clickX = (event.clientX - rect.left) * scaleX;
+    const clickY = (event.clientY - rect.top) * scaleY;
+
     const textBounds = getTextBounds();
-    if (event.x >= textBounds.x && event.x <= textBounds.x + textBounds.width &&
-        event.y >= textBounds.y - textBounds.height && event.y <= textBounds.y) {
+    if (clickX >= textBounds.x && clickX <= textBounds.x + textBounds.width &&
+        clickY >= textBounds.y - textBounds.height && clickY <= textBounds.y) {
         startExplosion();
     }
-});
+}
+
+function handleTouch(event) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const touchX = (event.touches[0].clientX - rect.left) * scaleX;
+    const touchY = (event.touches[0].clientY - rect.top) * scaleY;
+
+    const textBounds = getTextBounds();
+    if (touchX >= textBounds.x && touchX <= textBounds.x + textBounds.width &&
+        touchY >= textBounds.y - textBounds.height && touchY <= textBounds.y) {
+        startExplosion();
+    }
+}
+
+window.addEventListener('mousemove', handleInteraction);
+window.addEventListener('touchmove', handleInteraction, { passive: false });
+canvas.addEventListener('click', handleClick);
+canvas.addEventListener('touchend', handleTouch);
 
 function getTextBounds() {
     const text = 'Jonas Kjeldmand Jensen';
     const metrics = ctx.measureText(text);
+    const fontSize = parseFloat(ctx.font);
     return {
         x: canvas.width - metrics.width - 20,
         y: canvas.height - 20,
         width: metrics.width,
-        height: 35 // Approximate height based on font size
+        height: fontSize * 1.2 // Approximate height based on font size
     };
 }
 
@@ -168,7 +206,5 @@ init();
 animate();
 
 window.addEventListener('resize', function() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
     init();
 });
