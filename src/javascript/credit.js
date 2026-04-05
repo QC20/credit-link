@@ -37,8 +37,8 @@ const CONFIG = {
   breathAmplitude:   0.8,
   breathSpeed:       0.001,
   shimmerSpeed:      0.0004,
-  easterEggDelay:    7500,
-  easterEggDuration: 2500,
+  easterEggDelay:    3000,
+  easterEggDuration: 4000,
   longPressDuration: 600,
 };
 
