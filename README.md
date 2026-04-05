@@ -1,41 +1,141 @@
-# Interactive Particle Credit Link
+# credit-link
 
-This project creates an interactive particle animation that forms the text "Jonas Kjeldmand Jensen". When users hover over or touch the text (on mobile devices), the particles react and move organically. Clicking or tapping the text triggers an explosion effect before redirecting to a specified URL.
+Interactive particle animation that forms your name as a digital signature. Built as a Web Component so it drops into any project with a single line.
 
-## Features
+---
 
-- Responsive design that works on both desktop and mobile devices
-- Interactive particle animation that reacts to mouse/touch input
-- Text formed by particles that disperse and re-form
-- Explosion effect on click/tap, followed by a page redirect
-- Smooth performance optimized for various screen sizes and pixel densities
+## Usage in other projects
 
-## Technical Details
+Point to the hosted file on your Vercel deployment. No install, no build step.
 
-The project consists of three main files:
+```html
+<!-- 1. Load the component (once, in <head> or before </body>) -->
+<script type="module" src="https://jonaskjeldmand.vercel.app/credit-link.js"></script>
 
-1. `index.html`: The main HTML file that sets up the canvas element.
-2. `credit.js`: The JavaScript file containing all the logic for the particle animation, interactivity, and explosion effect.
-3. `credit.css`: The CSS file that styles the canvas and ensures it covers the full viewport.
+<!-- 2. Drop the tag anywhere in your HTML -->
+<credit-link></credit-link>
+```
 
-The animation is created using HTML5 Canvas and vanilla JavaScript. It uses requestAnimationFrame for smooth animation and is optimized for performance on both desktop and mobile devices.
+That is all. The animation renders as a fixed overlay in the bottom-right corner. Updates pushed to this repo propagate to every project automatically.
 
-## Customization
+---
 
-You can customize the following aspects of the animation:
+## Per-project overrides (optional)
 
-- Text content: Change the 'Jonas Kjeldmand Jensen' string in the `init()` function.
-- Redirect URL: Modify the `redirectURL` constant at the top of the JavaScript file.
-- Particle behavior: Adjust parameters like `maxDistance`, `returnForce`, and explosion speed in the `Particle` class methods.
-- Visual style: Modify particle size, color, and density in the `Particle` class constructor and `draw()` method.
+All defaults live in `DEFAULTS` inside `credit-link.js`. Override them per-project via HTML attributes:
 
-## Browser Compatibility
+```html
+<credit-link
+  text="Your Name Here"
+  href="https://your-portfolio.com"
+  easter-egg="you@email.com"
+></credit-link>
+```
 
-This animation should work on all modern browsers that support HTML5 Canvas and ES6 JavaScript features. It has been optimized for both desktop and mobile devices.
+| Attribute    | Default                              | Description                          |
+|-------------|--------------------------------------|--------------------------------------|
+| `text`       | `Jonas Kjeldmand Jensen`            | Text the particles form              |
+| `href`       | `https://jonaskjeldmand.vercel.app/`| Where clicking the text navigates    |
+| `easter-egg` | `jokje@dtu.dk`                      | Text shown after hovering 3 seconds  |
 
-## Performance Considerations
+---
 
-The animation adjusts the number of particles based on the device's pixel ratio to maintain good performance across different devices. On high-density displays, it may create fewer particles to ensure smooth animation.
+## Framework usage
 
+Since it is a native Web Component, it works without any wrappers.
 
-Enjoy the interactive particle text animation! Feel free to use, modify, and expand upon this project for your own creative purposes.
+**React / Next.js**
+```jsx
+// No import needed beyond the script tag in your _document.js or layout
+export default function Layout({ children }) {
+  return (
+    <>
+      {children}
+      <credit-link />
+    </>
+  );
+}
+```
+
+**Vue**
+```vue
+<template>
+  <credit-link />
+</template>
+```
+
+**Svelte**
+```svelte
+<credit-link />
+```
+
+**Astro**
+```astro
+<credit-link />
+```
+
+Add `is:inline` to the script tag in Astro to prevent it being processed by the bundler.
+
+---
+
+## Updating defaults globally
+
+Open `credit-link.js` and edit the `DEFAULTS` object at the top:
+
+```js
+const DEFAULTS = {
+  text:      'Jonas Kjeldmand Jensen',
+  href:      'https://jonaskjeldmand.vercel.app/',
+  easterEgg: 'jokje@dtu.dk',
+};
+```
+
+Push the change and all projects that reference the hosted URL reflect it on next page load.
+
+---
+
+## Behaviour config
+
+All timing, physics, and visual parameters are in the `CONFIG` object directly below `DEFAULTS` in `credit-link.js`.
+
+| Key                | Default | Effect                                      |
+|--------------------|---------|---------------------------------------------|
+| `mouseRadius`      | 55      | Interaction radius in CSS pixels            |
+| `breathAmplitude`  | 0.8     | Idle oscillation size in pixels             |
+| `shimmerSpeed`     | 0.0004  | Rate of colour shimmer                      |
+| `easterEggDelay`   | 3000    | ms of hovering before easter egg triggers   |
+| `easterEggDuration`| 4000    | ms the easter egg text stays visible        |
+| `longPressDuration`| 600     | ms touch hold to trigger explosion (mobile) |
+| `gravity`          | 0.12    | Downward pull on exploding particles        |
+| `explosionDuration`| 1500    | Total explosion animation in ms             |
+
+---
+
+## Deploying
+
+The file needs to be publicly accessible. Since you are already on Vercel, place `credit-link.js` in your `/public` folder:
+
+```
+your-repo/
+  public/
+    credit-link.js   ← accessible at https://your-domain.com/credit-link.js
+  credit-link.js     ← source (or the same file)
+```
+
+Other projects then reference `https://your-domain.com/credit-link.js` and never need to change that URL again.
+
+---
+
+## Local development
+
+```bash
+# Any static server works, e.g.:
+npx serve .
+# Then open http://localhost:3000
+```
+
+---
+
+## Browser support
+
+All modern browsers supporting Custom Elements v1 and ES2020. No polyfills needed for Chrome, Firefox, Safari, and Edge.
