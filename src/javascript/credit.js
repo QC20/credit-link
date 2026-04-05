@@ -1,61 +1,46 @@
+/**
+ * <credit-link> — Jonas Kjeldmand Jensen
+ *
+ * Self-contained Web Component. Other projects only need:
+ *
+ *   <script type="module" src="https://jonaskjeldmand.vercel.app/credit-link.js"></script>
+ *   <credit-link></credit-link>
+ *
+ * All defaults live in DEFAULTS below — change them here and every
+ * project that imports the component picks up the update automatically.
+ *
+ * Per-project overrides (optional) via HTML attributes:
+ *   <credit-link text="..." href="..." easter-egg="..."></credit-link>
+ */
+
 // =============================================================
-// CONFIG — tweak everything from here
+// DEFAULTS — the single source of truth across all projects
 // =============================================================
-const CONFIG = {
-  text:              'Jonas Kjeldmand Jensen',
-  easterEggText:     'jokje@dtu.dk',
-  redirectURL:       'https://jonaskjeldmand.vercel.app/',
-
-  // Interaction
-  mouseRadius:       55,      // [8] larger than original 35
-  returnForce:       0.05,
-  damping:           0.9,
-
-  // Particles
-  particleSize:      1.25,
-  sampleStep:        3,       // CSS-pixel gap between sampled points
-
-  // Explosion  [3] radial burst from click origin + [2] motion blur
-  explosionDuration: 1500,
-  fadeOutDuration:   500,
-  gravity:           0.12,    // downward pull during explosion
-
-  // Aesthetics
-  breathAmplitude:   0.8,     // [4] idle breath size in px
-  breathSpeed:       0.001,
-  shimmerSpeed:      0.0004,  // [1] colour shimmer rate
-
-  // Easter egg [7] — long hover over text
-  easterEggDelay:    7500,    // ms hovering before easter egg triggers
-  easterEggDuration: 2500,    // ms easter egg stays visible
-
-  // Mobile [10]
-  longPressDuration: 600,
+const DEFAULTS = {
+  text:         'Jonas Kjeldmand Jensen',
+  href:         'https://jonaskjeldmand.vercel.app/',
+  easterEgg:    'jokje@dtu.dk',
 };
 
 // =============================================================
-// GLOBALS
+// SHARED BEHAVIOUR CONFIG
 // =============================================================
-const canvas = document.getElementById('canvas');
-const ctx    = canvas.getContext('2d');
-
-let particles  = [];
-let exploding  = false;
-let explStart  = 0;
-let explX      = 0;
-let explY      = 0;
-let rafId      = null;          // [6] stored so we can cancel before reinit
-let textBounds = null;          // [9] cached after every init/resize
-let dpr        = window.devicePixelRatio || 1;  // [5] HiDPI
-let mouse      = { x: null, y: null };
-
-// Easter egg state [7]
-let eggBases   = [];
-let eggPhase   = 'idle';        // 'idle' | 'active' | 'reverting'
-let hoverStart = null;
-
-// Mobile long press [10]
-let lpTimer    = null;
+const CONFIG = {
+  mouseRadius:       55,
+  returnForce:       0.05,
+  damping:           0.9,
+  particleSize:      1.25,
+  sampleStep:        3,
+  explosionDuration: 1500,
+  fadeOutDuration:   500,
+  gravity:           0.12,
+  breathAmplitude:   0.8,
+  breathSpeed:       0.001,
+  shimmerSpeed:      0.0004,
+  easterEggDelay:    7500,
+  easterEggDuration: 2500,
+  longPressDuration: 600,
+};
 
 // =============================================================
 // PARTICLE
@@ -64,9 +49,9 @@ class Particle {
   constructor(x, y) {
     this.origX  = x;
     this.origY  = y;
-    this.baseX  = x;      // current lerp target — slides between orig and egg
+    this.baseX  = x;
     this.baseY  = y;
-    this.eggX   = x;      // populated during easter egg setup
+    this.eggX   = x;
     this.eggY   = y;
     this.x      = x;
     this.y      = y;
@@ -74,15 +59,14 @@ class Particle {
     this.vx     = 0;
     this.vy     = 0;
     this.alpha  = 1;
-    this.nx     = Math.random() * 0.5 - 0.25;  // noise amplitude x
+    this.nx     = Math.random() * 0.5 - 0.25;
     this.ny     = Math.random() * 0.5 - 0.25;
     this.nOff   = Math.random() * 1000;
-    this.bOff   = Math.random() * Math.PI * 2; // breath phase
-    this.hOff   = Math.random() * 60 - 30;     // per-particle hue nudge
+    this.bOff   = Math.random() * Math.PI * 2;
+    this.hOff   = Math.random() * 60 - 30;
   }
 
-  // [1] subtle shimmer: near-white with tiny blue/warm drift
-  draw(t) {
+  draw(ctx, t) {
     const wave = Math.sin(t * CONFIG.shimmerSpeed + this.nOff);
     const hue  = 215 + this.hOff * 0.2 + wave * 15;
     const sat  = 8   + wave * 6;
@@ -94,14 +78,13 @@ class Particle {
     ctx.fill();
   }
 
-  update(t) {
-    // [7] slide base smoothly toward origin or easter-egg target
+  update(t, mouse, eggPhase, exploding, explStart, explX, explY) {
+    // Slide base toward origin or easter egg target
     const destX = eggPhase === 'active' ? this.eggX : this.origX;
     const destY = eggPhase === 'active' ? this.eggY : this.origY;
     this.baseX += (destX - this.baseX) * 0.04;
     this.baseY += (destY - this.baseY) * 0.04;
 
-    // [3] explosion: radial burst + gravity
     if (exploding) {
       this.vy += CONFIG.gravity;
       this.x  += this.vx;
@@ -120,15 +103,13 @@ class Particle {
     const dist = hasMouse ? Math.sqrt(dx * dx + dy * dy) : Infinity;
 
     if (dist < CONFIG.mouseRadius) {
-      // push/pull near cursor with organic noise
       const force = (CONFIG.mouseRadius - dist) / CONFIG.mouseRadius;
       const angle = Math.atan2(dy, dx);
       this.vx += Math.cos(angle) * force * 0.1 + Math.sin(t * 0.002 + this.nOff) * this.nx;
       this.vy += Math.sin(angle) * force * 0.1 + Math.cos(t * 0.002 + this.nOff) * this.ny;
     } else {
-      // [4] return-to-base with idle breathing
-      const bx = Math.sin(t * CONFIG.breathSpeed        + this.bOff) * CONFIG.breathAmplitude;
-      const by = Math.cos(t * CONFIG.breathSpeed * 0.7  + this.bOff) * CONFIG.breathAmplitude;
+      const bx = Math.sin(t * CONFIG.breathSpeed       + this.bOff) * CONFIG.breathAmplitude;
+      const by = Math.cos(t * CONFIG.breathSpeed * 0.7 + this.bOff) * CONFIG.breathAmplitude;
       this.vx += (this.baseX + bx - this.x) * CONFIG.returnForce;
       this.vy += (this.baseY + by - this.y) * CONFIG.returnForce;
     }
@@ -139,8 +120,7 @@ class Particle {
     this.vy *= CONFIG.damping;
   }
 
-  // [3] radial launch from explosion origin
-  launch() {
+  launch(explX, explY) {
     const dx   = this.x - explX;
     const dy   = this.y - explY;
     const dist = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -151,206 +131,287 @@ class Particle {
 }
 
 // =============================================================
-// TEXT SAMPLING  [5] works in CSS-pixel space; handles HiDPI
+// WEB COMPONENT
 // =============================================================
-function sampleText(text, x, y, fontSize) {
-  const offscreen   = document.createElement('canvas');
-  offscreen.width   = canvas.width;   // physical pixels
-  offscreen.height  = canvas.height;
-  const octx        = offscreen.getContext('2d');
-  octx.scale(dpr, dpr);               // draw in CSS pixels
-  octx.font         = `550 ${fontSize}px "Poppins", Arial, sans-serif`;
-  octx.fillStyle    = 'white';
-  octx.fillText(text, x, y);
+class CreditLink extends HTMLElement {
+  constructor() {
+    super();
+    // Bind all handlers so we can cleanly add and remove them
+    this._onMouseMove   = this._onMouseMove.bind(this);
+    this._onMouseOut    = this._onMouseOut.bind(this);
+    this._onWindowClick = this._onWindowClick.bind(this);
+    this._onTouchMove   = this._onTouchMove.bind(this);
+    this._onTouchEnd    = this._onTouchEnd.bind(this);
+    this._onTouchStart  = this._onTouchStart.bind(this);
+    this._onTouchMoveLP = this._onTouchMoveLP.bind(this);
+    this._onResize      = this._onResize.bind(this);
+    this._animate       = this._animate.bind(this);
+  }
 
-  const data  = octx.getImageData(0, 0, offscreen.width, offscreen.height);
-  const step  = Math.max(1, Math.round(CONFIG.sampleStep * dpr));
-  const out   = [];
+  // Attributes that trigger a re-init when changed
+  static get observedAttributes() { return ['text', 'href', 'easter-egg']; }
 
-  for (let py = 0; py < offscreen.height; py += step) {
-    for (let px = 0; px < offscreen.width; px += step) {
-      if (data.data[(py * offscreen.width + px) * 4 + 3] > 200) {
-        out.push({ x: px / dpr, y: py / dpr }); // convert back to CSS px
+  // Attribute getters fall back to DEFAULTS — change DEFAULTS to update all projects
+  get _text()      { return this.getAttribute('text')       || DEFAULTS.text; }
+  get _href()      { return this.getAttribute('href')       || DEFAULTS.href; }
+  get _easterEgg() { return this.getAttribute('easter-egg') || DEFAULTS.easterEgg; }
+
+  // ----- Lifecycle -----
+
+  connectedCallback() {
+    this._buildCanvas();
+    this._initState();
+    this._attachEvents();
+    document.fonts.ready.then(() => this._init());
+  }
+
+  disconnectedCallback() {
+    if (this._rafId) cancelAnimationFrame(this._rafId);
+    if (this._canvas?.parentNode) this._canvas.parentNode.removeChild(this._canvas);
+    this._detachEvents();
+  }
+
+  attributeChangedCallback() {
+    // Re-init only after first connection
+    if (this._canvas) this._init();
+  }
+
+  // ----- Canvas setup -----
+
+  _buildCanvas() {
+    this._canvas = document.createElement('canvas');
+    // pointer-events: none so the canvas does not block page interactions
+    // cursor is changed on document.body instead
+    this._canvas.style.cssText = [
+      'position:fixed',
+      'top:0',
+      'left:0',
+      'width:100vw',
+      'height:100vh',
+      'pointer-events:none',
+      'z-index:2147483647',
+      'display:block',
+    ].join(';');
+    document.body.appendChild(this._canvas);
+    this._ctx = this._canvas.getContext('2d');
+  }
+
+  _initState() {
+    this._particles  = [];
+    this._exploding  = false;
+    this._explStart  = 0;
+    this._explX      = 0;
+    this._explY      = 0;
+    this._rafId      = null;
+    this._textBounds = null;
+    this._dpr        = window.devicePixelRatio || 1;
+    this._mouse      = { x: null, y: null };
+    this._eggBases   = [];
+    this._eggPhase   = 'idle';
+    this._hoverStart = null;
+    this._lpTimer    = null;
+  }
+
+  // ----- Events -----
+
+  _attachEvents() {
+    window.addEventListener('mousemove',  this._onMouseMove);
+    window.addEventListener('mouseout',   this._onMouseOut);
+    window.addEventListener('click',      this._onWindowClick);
+    window.addEventListener('touchmove',  this._onTouchMove,  { passive: false });
+    window.addEventListener('touchend',   this._onTouchEnd);
+    window.addEventListener('touchstart', this._onTouchStart,  { passive: true });
+    window.addEventListener('touchmove',  this._onTouchMoveLP, { passive: true });
+    window.addEventListener('resize',     this._onResize);
+  }
+
+  _detachEvents() {
+    window.removeEventListener('mousemove',  this._onMouseMove);
+    window.removeEventListener('mouseout',   this._onMouseOut);
+    window.removeEventListener('click',      this._onWindowClick);
+    window.removeEventListener('touchmove',  this._onTouchMove);
+    window.removeEventListener('touchend',   this._onTouchEnd);
+    window.removeEventListener('touchstart', this._onTouchStart);
+    window.removeEventListener('touchmove',  this._onTouchMoveLP);
+    window.removeEventListener('resize',     this._onResize);
+  }
+
+  _onMouseMove(e) {
+    this._mouse.x = e.clientX;
+    this._mouse.y = e.clientY;
+    document.body.style.cursor = this._inBounds(e.clientX, e.clientY) ? 'pointer' : '';
+  }
+
+  _onMouseOut() {
+    this._mouse.x = null;
+    this._mouse.y = null;
+    document.body.style.cursor = '';
+  }
+
+  _onWindowClick(e) {
+    if (this._inBounds(e.clientX, e.clientY)) this._startExplosion(e.clientX, e.clientY);
+  }
+
+  _onTouchMove(e) {
+    this._mouse.x = e.touches[0].clientX;
+    this._mouse.y = e.touches[0].clientY;
+    e.preventDefault();
+  }
+
+  _onTouchEnd() {
+    this._mouse.x = null;
+    this._mouse.y = null;
+    clearTimeout(this._lpTimer);
+  }
+
+  _onTouchStart(e) {
+    const x = e.touches[0].clientX;
+    const y = e.touches[0].clientY;
+    this._lpTimer = setTimeout(() => {
+      if (this._inBounds(x, y)) this._startExplosion(x, y);
+    }, CONFIG.longPressDuration);
+  }
+
+  _onTouchMoveLP() { clearTimeout(this._lpTimer); }
+
+  _onResize() { this._init(); }
+
+  // ----- Init -----
+
+  _init() {
+    if (this._rafId) { cancelAnimationFrame(this._rafId); this._rafId = null; }
+
+    this._exploding  = false;
+    this._eggPhase   = 'idle';
+    this._hoverStart = null;
+    this._particles  = [];
+
+    this._dpr = window.devicePixelRatio || 1;
+    const w   = window.innerWidth;
+    const h   = window.innerHeight;
+
+    this._canvas.width        = w * this._dpr;
+    this._canvas.height       = h * this._dpr;
+    this._canvas.style.width  = `${w}px`;
+    this._canvas.style.height = `${h}px`;
+    this._ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this._ctx.scale(this._dpr, this._dpr);
+
+    const fontSize = Math.min(w / 20, 28);
+    this._ctx.font = `550 ${fontSize}px "Poppins", Arial, sans-serif`;
+    const metrics  = this._ctx.measureText(this._text);
+    const textW    = metrics.width;
+    const textX    = w - textW - 20;
+    const textY    = h - 20;
+
+    this._textBounds = { x: textX, y: textY - fontSize * 1.2, width: textW, height: fontSize * 1.2 };
+
+    const mainPos    = this._sampleText(this._text, textX, textY, fontSize);
+    this._particles  = mainPos.map(p => new Particle(p.x, p.y));
+    this._eggBases   = this._sampleText(this._easterEgg, textX, textY, fontSize);
+
+    this._rafId = requestAnimationFrame(this._animate);
+  }
+
+  // ----- Pixel sampling -----
+
+  _sampleText(text, x, y, fontSize) {
+    const off    = document.createElement('canvas');
+    off.width    = this._canvas.width;
+    off.height   = this._canvas.height;
+    const octx   = off.getContext('2d');
+    octx.scale(this._dpr, this._dpr);
+    octx.font      = `550 ${fontSize}px "Poppins", Arial, sans-serif`;
+    octx.fillStyle = 'white';
+    octx.fillText(text, x, y);
+
+    const data  = octx.getImageData(0, 0, off.width, off.height);
+    const step  = Math.max(1, Math.round(CONFIG.sampleStep * this._dpr));
+    const out   = [];
+
+    for (let py = 0; py < off.height; py += step) {
+      for (let px = 0; px < off.width; px += step) {
+        if (data.data[(py * off.width + px) * 4 + 3] > 200) {
+          out.push({ x: px / this._dpr, y: py / this._dpr });
+        }
       }
     }
+    return out;
   }
-  return out;
-}
 
-// =============================================================
-// INIT  [5][6][9]
-// =============================================================
-function init() {
-  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }  // [6]
+  // ----- Easter egg -----
 
-  exploding  = false;
-  eggPhase   = 'idle';
-  hoverStart = null;
-  particles  = [];
+  _checkEasterEgg(t) {
+    if (this._eggPhase !== 'idle' || this._mouse.x === null) { this._hoverStart = null; return; }
+    if (this._inBounds(this._mouse.x, this._mouse.y)) {
+      if (this._hoverStart === null) this._hoverStart = t;
+      if (t - this._hoverStart >= CONFIG.easterEggDelay) this._activateEasterEgg();
+    } else {
+      this._hoverStart = null;
+    }
+  }
 
-  dpr = window.devicePixelRatio || 1;
-  const w = window.innerWidth;
-  const h = window.innerHeight;
+  _activateEasterEgg() {
+    if (this._eggPhase !== 'idle' || !this._eggBases.length) return;
+    this._eggPhase = 'active';
+    this._particles.forEach((p, i) => {
+      const t = this._eggBases[i % this._eggBases.length];
+      p.eggX = t.x;
+      p.eggY = t.y;
+    });
+    setTimeout(() => {
+      this._eggPhase   = 'reverting';
+      setTimeout(() => { this._eggPhase = 'idle'; this._hoverStart = null; }, 1500);
+    }, CONFIG.easterEggDuration);
+  }
 
-  // [5] proper HiDPI setup
-  canvas.width        = w * dpr;
-  canvas.height       = h * dpr;
-  canvas.style.width  = `${w}px`;
-  canvas.style.height = `${h}px`;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);  // reset before re-scaling
-  ctx.scale(dpr, dpr);
+  // ----- Explosion -----
 
-  const fontSize  = Math.min(w / 20, 28);
-  ctx.font        = `550 ${fontSize}px "Poppins", Arial, sans-serif`;
-  const metrics   = ctx.measureText(CONFIG.text);
-  const textW     = metrics.width;
-  const textX     = w - textW - 20;
-  const textY     = h - 20;
+  _startExplosion(x, y) {
+    if (this._exploding) return;
+    this._explX     = x;
+    this._explY     = y;
+    this._exploding = true;
+    this._explStart = Date.now();
+    this._particles.forEach(p => p.launch(x, y));
+    setTimeout(() => { window.location.href = this._href; }, CONFIG.explosionDuration);
+  }
 
-  // [9] cache bounds
-  textBounds = {
-    x:      textX,
-    y:      textY - fontSize * 1.2,
-    width:  textW,
-    height: fontSize * 1.2,
-  };
+  // ----- Helpers -----
 
-  const mainPos = sampleText(CONFIG.text, textX, textY, fontSize);
-  particles = mainPos.map(p => new Particle(p.x, p.y));
+  _inBounds(x, y) {
+    const b = this._textBounds;
+    return b && x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height;
+  }
 
-  // [7] pre-sample easter egg text at same position
-  eggBases = sampleText(CONFIG.easterEggText, textX, textY, fontSize);
+  // ----- Animation loop -----
 
-  rafId = requestAnimationFrame(animate);
-}
+  _animate() {
+    const t   = Date.now();
+    const ctx = this._ctx;
+    const w   = window.innerWidth;
+    const h   = window.innerHeight;
 
-// =============================================================
-// EASTER EGG  [7]
-// =============================================================
-function activateEasterEgg() {
-  if (eggPhase !== 'idle' || eggBases.length === 0) return;
-  eggPhase = 'active';
+    if (this._exploding) {
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx.fillRect(0, 0, w, h);
+    } else {
+      ctx.clearRect(0, 0, w, h);
+    }
 
-  particles.forEach((p, i) => {
-    const t  = eggBases[i % eggBases.length];
-    p.eggX   = t.x;
-    p.eggY   = t.y;
-  });
+    this._checkEasterEgg(t);
 
-  setTimeout(() => {
-    eggPhase   = 'reverting';
-    setTimeout(() => { eggPhase = 'idle'; hoverStart = null; }, 1500);
-  }, CONFIG.easterEggDuration);
-}
+    for (let i = 0; i < this._particles.length; i++) {
+      const p = this._particles[i];
+      p.update(t, this._mouse, this._eggPhase, this._exploding, this._explStart, this._explX, this._explY);
+      p.draw(ctx, t);
+    }
 
-function checkEasterEggHover(t) {
-  if (eggPhase !== 'idle' || mouse.x === null) { hoverStart = null; return; }
-  if (inBounds(mouse.x, mouse.y)) {
-    if (hoverStart === null) hoverStart = t;
-    if (t - hoverStart >= CONFIG.easterEggDelay) activateEasterEgg();
-  } else {
-    hoverStart = null;
+    this._rafId = requestAnimationFrame(this._animate);
   }
 }
 
-// =============================================================
-// INTERACTION HELPERS
-// =============================================================
-function inBounds(x, y) {
-  if (!textBounds) return false;
-  return (
-    x >= textBounds.x && x <= textBounds.x + textBounds.width &&
-    y >= textBounds.y && y <= textBounds.y + textBounds.height
-  );
+// Register the custom element
+if (!customElements.get('credit-link')) {
+  customElements.define('credit-link', CreditLink);
 }
-
-function startExplosion(x, y) {
-  if (exploding) return;
-  explX      = x;
-  explY      = y;
-  exploding  = true;
-  explStart  = Date.now();
-  particles.forEach(p => p.launch());
-  setTimeout(() => { window.location.href = CONFIG.redirectURL; }, CONFIG.explosionDuration);
-}
-
-// =============================================================
-// EVENTS
-// =============================================================
-
-// Mouse move — update position + [8] cursor change
-window.addEventListener('mousemove', e => {
-  mouse.x = e.clientX;
-  mouse.y = e.clientY;
-  canvas.style.cursor = inBounds(mouse.x, mouse.y) ? 'pointer' : 'default';
-});
-
-window.addEventListener('mouseout', () => {
-  mouse.x = null;
-  mouse.y = null;
-  canvas.style.cursor = 'default';
-});
-
-// Click
-canvas.addEventListener('click', e => {
-  const x = e.clientX;
-  const y = e.clientY;
-  if (inBounds(x, y)) startExplosion(x, y);
-});
-
-// Touch move
-window.addEventListener('touchmove', e => {
-  mouse.x = e.touches[0].clientX;
-  mouse.y = e.touches[0].clientY;
-  e.preventDefault();
-}, { passive: false });
-
-window.addEventListener('touchend', () => {
-  mouse.x = null;
-  mouse.y = null;
-  clearTimeout(lpTimer);
-});
-
-// [10] long press on mobile
-canvas.addEventListener('touchstart', e => {
-  const x = e.touches[0].clientX;
-  const y = e.touches[0].clientY;
-  lpTimer = setTimeout(() => {
-    if (inBounds(x, y)) startExplosion(x, y);
-  }, CONFIG.longPressDuration);
-}, { passive: true });
-
-canvas.addEventListener('touchmove', () => clearTimeout(lpTimer), { passive: true });
-
-// Resize — [6] cancels existing loop before reinit
-window.addEventListener('resize', () => init());
-
-// =============================================================
-// ANIMATE
-// =============================================================
-function animate() {
-  const t = Date.now();
-
-  // [2] motion blur during explosion; clean clear otherwise
-  if (exploding) {
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
-  } else {
-    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-  }
-
-  // [7] track hover for easter egg
-  checkEasterEggHover(t);
-
-  for (let i = 0; i < particles.length; i++) {
-    particles[i].update(t);
-    particles[i].draw(t);
-  }
-
-  rafId = requestAnimationFrame(animate);
-}
-
-// =============================================================
-// BOOT — wait for font before sampling pixels
-// =============================================================
-document.fonts.ready.then(() => init());
