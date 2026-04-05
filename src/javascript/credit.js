@@ -26,9 +26,9 @@ const DEFAULTS = {
 // SHARED BEHAVIOUR CONFIG
 // =============================================================
 const CONFIG = {
-  mouseRadius:       55,
-  returnForce:       0.05,
-  damping:           0.9,
+  mouseRadius:       180,   // was 55 — much larger interaction zone
+  returnForce:       0.035, // was 0.05 — slower snap-back for floatier feel
+  damping:           0.82,  // was 0.9 — less damping so particles travel further
   particleSize:      1.25,
   sampleStep:        3,
   explosionDuration: 1500,
@@ -59,8 +59,8 @@ class Particle {
     this.vx     = 0;
     this.vy     = 0;
     this.alpha  = 1;
-    this.nx     = Math.random() * 0.5 - 0.25;
-    this.ny     = Math.random() * 0.5 - 0.25;
+    this.nx     = Math.random() * 2.5 - 1.25;  // was 0.5 - 0.25 — wider scatter per particle
+    this.ny     = Math.random() * 2.5 - 1.25;
     this.nOff   = Math.random() * 1000;
     this.bOff   = Math.random() * Math.PI * 2;
     this.hOff   = Math.random() * 60 - 30;
@@ -105,8 +105,14 @@ class Particle {
     if (dist < CONFIG.mouseRadius) {
       const force = (CONFIG.mouseRadius - dist) / CONFIG.mouseRadius;
       const angle = Math.atan2(dy, dx);
-      this.vx += Math.cos(angle) * force * 0.1 + Math.sin(t * 0.002 + this.nOff) * this.nx;
-      this.vy += Math.sin(angle) * force * 0.1 + Math.cos(t * 0.002 + this.nOff) * this.ny;
+      // Stronger base push with squared falloff for a sharper shockwave edge
+      const push  = force * force * 0.55;
+      // Per-particle chaos: turbulence scales up the closer the mouse gets
+      const chaos = (1 - dist / CONFIG.mouseRadius) * 1.8;
+      this.vx += Math.cos(angle) * push
+               + Math.sin(t * 0.003 + this.nOff) * this.nx * chaos;
+      this.vy += Math.sin(angle) * push
+               + Math.cos(t * 0.003 + this.nOff) * this.ny * chaos;
     } else {
       const bx = Math.sin(t * CONFIG.breathSpeed       + this.bOff) * CONFIG.breathAmplitude;
       const by = Math.cos(t * CONFIG.breathSpeed * 0.7 + this.bOff) * CONFIG.breathAmplitude;
@@ -304,21 +310,10 @@ class CreditLink extends HTMLElement {
     this._ctx.setTransform(1, 0, 0, 1, 0, 0);
     this._ctx.scale(this._dpr, this._dpr);
 
-    // --- Consistent quality regardless of screen size ---
-    //
-    // We always sample at a fixed large font (SAMPLE_FONT_SIZE) on an offscreen
-    // canvas, then scale the resulting particle positions down to the target
-    // display font size. This means the text always has the same particle
-    // resolution (same number of dots, same crispness) on every screen.
-    //
-    // Display size still adapts to the viewport so the text never feels too
-    // large or too small, but quality is no longer tied to that size.
-
-    const SAMPLE_FONT_SIZE  = 72;   // always sample at this size for consistent density
-    const TARGET_PARTICLES  = 800;  // aim for this many particles per text
+    const SAMPLE_FONT_SIZE  = 72;
+    const TARGET_PARTICLES  = 800;
     const displayFontSize   = Math.min(Math.max(w / 22, 16), 32);
 
-    // Measure display-size text to position it in the corner
     this._ctx.font   = `550 ${displayFontSize}px "Poppins", Arial, sans-serif`;
     const displayW   = this._ctx.measureText(this._text).width;
     const displayX   = w - displayW - 20;
@@ -331,17 +326,14 @@ class CreditLink extends HTMLElement {
       height: displayFontSize * 1.2,
     };
 
-    // Sample at large font, origin (0,0) — we will scale + translate afterward
     const rawMain = this._sampleText(this._text,      0, SAMPLE_FONT_SIZE, SAMPLE_FONT_SIZE, TARGET_PARTICLES);
     const rawEgg  = this._sampleText(this._easterEgg, 0, SAMPLE_FONT_SIZE, SAMPLE_FONT_SIZE, TARGET_PARTICLES);
 
-    // Measure sampled text width at the sample size to compute scale factor
     const offCtx    = document.createElement('canvas').getContext('2d');
     offCtx.font     = `550 ${SAMPLE_FONT_SIZE}px "Poppins", Arial, sans-serif`;
     const sampleW   = offCtx.measureText(this._text).width;
     const scale     = displayW / sampleW;
 
-    // Transform sampled positions into display space
     const transform = ({ x, y }) => ({
       x: displayX + x * scale,
       y: displayY + (y - SAMPLE_FONT_SIZE) * scale,
@@ -374,7 +366,6 @@ class CreditLink extends HTMLElement {
 
     const data = octx.getImageData(0, 0, width, height);
 
-    // Collect all lit pixels first (at step 1) then subsample to hit target count
     const all  = [];
     const step = Math.max(1, Math.round(scale));
     for (let py = 0; py < height; py += step) {
@@ -387,7 +378,6 @@ class CreditLink extends HTMLElement {
 
     if (all.length === 0) return [];
 
-    // Subsample evenly to targetParticles if we have more than needed
     if (all.length <= targetParticles) return all;
     const skip = all.length / targetParticles;
     const out  = [];
