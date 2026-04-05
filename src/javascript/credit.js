@@ -162,7 +162,14 @@ class CreditLink extends HTMLElement {
     this._buildCanvas();
     this._initState();
     this._attachEvents();
-    document.fonts.ready.then(() => this._init());
+    // Explicitly wait for the exact Poppins weight used during pixel sampling
+    document.fonts.load('550 28px Poppins').finally(() => {
+      this._init();
+      // Safety net: if font still wasn't ready and zero particles were sampled, retry once
+      setTimeout(() => {
+        if (this._particles.length === 0) this._init();
+      }, 300);
+    });
   }
 
   disconnectedCallback() {
@@ -297,44 +304,95 @@ class CreditLink extends HTMLElement {
     this._ctx.setTransform(1, 0, 0, 1, 0, 0);
     this._ctx.scale(this._dpr, this._dpr);
 
-    const fontSize = Math.min(w / 20, 28);
-    this._ctx.font = `550 ${fontSize}px "Poppins", Arial, sans-serif`;
-    const metrics  = this._ctx.measureText(this._text);
-    const textW    = metrics.width;
-    const textX    = w - textW - 20;
-    const textY    = h - 20;
+    // --- Consistent quality regardless of screen size ---
+    //
+    // We always sample at a fixed large font (SAMPLE_FONT_SIZE) on an offscreen
+    // canvas, then scale the resulting particle positions down to the target
+    // display font size. This means the text always has the same particle
+    // resolution (same number of dots, same crispness) on every screen.
+    //
+    // Display size still adapts to the viewport so the text never feels too
+    // large or too small, but quality is no longer tied to that size.
 
-    this._textBounds = { x: textX, y: textY - fontSize * 1.2, width: textW, height: fontSize * 1.2 };
+    const SAMPLE_FONT_SIZE  = 72;   // always sample at this size for consistent density
+    const TARGET_PARTICLES  = 800;  // aim for this many particles per text
+    const displayFontSize   = Math.min(Math.max(w / 22, 16), 32);
 
-    const mainPos    = this._sampleText(this._text, textX, textY, fontSize);
-    this._particles  = mainPos.map(p => new Particle(p.x, p.y));
-    this._eggBases   = this._sampleText(this._easterEgg, textX, textY, fontSize);
+    // Measure display-size text to position it in the corner
+    this._ctx.font   = `550 ${displayFontSize}px "Poppins", Arial, sans-serif`;
+    const displayW   = this._ctx.measureText(this._text).width;
+    const displayX   = w - displayW - 20;
+    const displayY   = h - 20;
+
+    this._textBounds = {
+      x:      displayX,
+      y:      displayY - displayFontSize * 1.2,
+      width:  displayW,
+      height: displayFontSize * 1.2,
+    };
+
+    // Sample at large font, origin (0,0) — we will scale + translate afterward
+    const rawMain = this._sampleText(this._text,      0, SAMPLE_FONT_SIZE, SAMPLE_FONT_SIZE, TARGET_PARTICLES);
+    const rawEgg  = this._sampleText(this._easterEgg, 0, SAMPLE_FONT_SIZE, SAMPLE_FONT_SIZE, TARGET_PARTICLES);
+
+    // Measure sampled text width at the sample size to compute scale factor
+    const offCtx    = document.createElement('canvas').getContext('2d');
+    offCtx.font     = `550 ${SAMPLE_FONT_SIZE}px "Poppins", Arial, sans-serif`;
+    const sampleW   = offCtx.measureText(this._text).width;
+    const scale     = displayW / sampleW;
+
+    // Transform sampled positions into display space
+    const transform = ({ x, y }) => ({
+      x: displayX + x * scale,
+      y: displayY + (y - SAMPLE_FONT_SIZE) * scale,
+    });
+
+    const mainPos      = rawMain.map(transform);
+    const eggPos       = rawEgg.map(transform);
+
+    this._particles    = mainPos.map(p => new Particle(p.x, p.y));
+    this._eggBases     = eggPos;
 
     this._rafId = requestAnimationFrame(this._animate);
   }
 
   // ----- Pixel sampling -----
 
-  _sampleText(text, x, y, fontSize) {
+  _sampleText(text, x, y, fontSize, targetParticles = 600) {
+    const scale  = this._dpr;
+    const width  = Math.ceil(window.innerWidth  * scale);
+    const height = Math.ceil(window.innerHeight * scale);
+
     const off    = document.createElement('canvas');
-    off.width    = this._canvas.width;
-    off.height   = this._canvas.height;
+    off.width    = width;
+    off.height   = height;
     const octx   = off.getContext('2d');
-    octx.scale(this._dpr, this._dpr);
+    octx.scale(scale, scale);
     octx.font      = `550 ${fontSize}px "Poppins", Arial, sans-serif`;
     octx.fillStyle = 'white';
     octx.fillText(text, x, y);
 
-    const data  = octx.getImageData(0, 0, off.width, off.height);
-    const step  = Math.max(1, Math.round(CONFIG.sampleStep * this._dpr));
-    const out   = [];
+    const data = octx.getImageData(0, 0, width, height);
 
-    for (let py = 0; py < off.height; py += step) {
-      for (let px = 0; px < off.width; px += step) {
-        if (data.data[(py * off.width + px) * 4 + 3] > 200) {
-          out.push({ x: px / this._dpr, y: py / this._dpr });
+    // Collect all lit pixels first (at step 1) then subsample to hit target count
+    const all  = [];
+    const step = Math.max(1, Math.round(scale));
+    for (let py = 0; py < height; py += step) {
+      for (let px = 0; px < width; px += step) {
+        if (data.data[(py * width + px) * 4 + 3] > 200) {
+          all.push({ x: px / scale, y: py / scale });
         }
       }
+    }
+
+    if (all.length === 0) return [];
+
+    // Subsample evenly to targetParticles if we have more than needed
+    if (all.length <= targetParticles) return all;
+    const skip = all.length / targetParticles;
+    const out  = [];
+    for (let i = 0; i < targetParticles; i++) {
+      out.push(all[Math.round(i * skip)]);
     }
     return out;
   }
